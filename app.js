@@ -136,6 +136,43 @@ function escapeAttribute(value) {
   return escapeHtml(value).replace(/"/g, "&quot;");
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function highlightDocumentText(text, terms) {
+  const normalizedText = String(text ?? "");
+  const uniqueTerms = [...new Set(terms.filter(Boolean))];
+
+  if (!normalizedText.trim() || uniqueTerms.length === 0) {
+    return escapeHtml(normalizedText);
+  }
+
+  const pattern = uniqueTerms
+    .slice()
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp)
+    .join("|");
+
+  if (!pattern) {
+    return escapeHtml(normalizedText);
+  }
+
+  const regex = new RegExp(pattern, "gi");
+  const parts = [];
+  let lastIndex = 0;
+
+  for (const match of normalizedText.matchAll(regex)) {
+    const matchIndex = match.index ?? 0;
+    parts.push(escapeHtml(normalizedText.slice(lastIndex, matchIndex)));
+    parts.push(`<mark class="term-highlight">${escapeHtml(match[0])}</mark>`);
+    lastIndex = matchIndex + match[0].length;
+  }
+
+  parts.push(escapeHtml(normalizedText.slice(lastIndex)));
+  return parts.join("");
+}
+
 function collectDocuments() {
   return [...documentsContainer.querySelectorAll(".document-card")].map((card) => ({
     id: card.dataset.documentId,
@@ -185,31 +222,48 @@ function hideDownloadButtons() {
 function renderSummary(summaries) {
   summaryContainer.innerHTML = summaries
     .map(
-      (document) => `
-        <article class="summary-card">
-          <h3>${escapeHtml(document.title)}</h3>
-          <div class="summary-meta">
-            <span class="summary-pill">유효 토큰 ${document.totalTerms}개</span>
-            <span class="summary-pill">고유 단어 ${document.uniqueTerms}개</span>
-          </div>
-          <div class="keyword-list">
+      (document) => {
+        const topHighlightTerms = document.topKeywords.slice(0, 3).map((keyword) => keyword.term);
+        const highlightedPreview = highlightDocumentText(document.text, topHighlightTerms);
+
+        return `
+          <article class="summary-card">
+            <h3>${escapeHtml(document.title)}</h3>
+            <div class="summary-meta">
+              <span class="summary-pill">유효 토큰 ${document.totalTerms}개</span>
+              <span class="summary-pill">고유 단어 ${document.uniqueTerms}개</span>
+              <span class="summary-pill">상위 3개 형광 표시</span>
+            </div>
+            <div class="keyword-list">
+              ${
+                document.topKeywords.length > 0
+                  ? document.topKeywords
+                      .map(
+                        (keyword, index) => `
+                          <span class="keyword-chip${index < 3 ? " is-top3" : ""}">
+                            ${index < 3 ? `<em>TOP ${index + 1}</em>` : ""}
+                            ${escapeHtml(keyword.term)}
+                            <strong>${formatDecimal(keyword.score, 4)}</strong>
+                          </span>
+                        `,
+                      )
+                      .join("")
+                  : '<span class="muted-copy">남은 토큰이 없어 핵심어를 계산하지 못했습니다.</span>'
+              }
+            </div>
             ${
-              document.topKeywords.length > 0
-                ? document.topKeywords
-                    .map(
-                      (keyword) => `
-                        <span class="keyword-chip">
-                          ${escapeHtml(keyword.term)}
-                          <strong>${formatDecimal(keyword.score, 4)}</strong>
-                        </span>
-                      `,
-                    )
-                    .join("")
-                : '<span class="muted-copy">남은 토큰이 없어 핵심어를 계산하지 못했습니다.</span>'
+              topHighlightTerms.length > 0
+                ? `
+                  <div class="highlight-preview">
+                    <p class="highlight-preview-label">원문 하이라이트 미리보기</p>
+                    <p class="highlight-preview-text">${highlightedPreview}</p>
+                  </div>
+                `
+                : ""
             }
-          </div>
-        </article>
-      `,
+          </article>
+        `;
+      },
     )
     .join("");
 }
